@@ -12,13 +12,24 @@ Plot regional deaths from NRS weekly stats
 ```{r, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(lubridate)
+library(janitor)
+library(png)
+library(grid)
+
+logo <- readPNG("assets/SCADR Logo_Primary_Full Colour_HI.png")
+g_logo <- rasterGrob(logo, interpolate = TRUE)
 
 colours_davidhen <- c("#e53935", "#3949ab", "#8e24aa", "#039be5",
                       "#00897b", "#7cb342", "#fdd835", "#fb8c00",
                       "#6d4c41", "#546e7a")
 
+scadr_colours <- c("#011e41", "#160b75", "#330072", "#009658", "#007d8a", 
+                   "#09db9b", "#67899C", "#9896d9", "#a7aca2", "#f7a700")
+
 theme_set(theme_minimal(base_family = "Roboto") +
             theme(panel.grid.minor = element_blank()))
+
+options(scipen = 10)
 ```
 
 
@@ -26,37 +37,80 @@ theme_set(theme_minimal(base_family = "Roboto") +
 
 Old code, amend this when we see the data at 12
 
-```{r}
-regions <- read_csv("https://raw.githubusercontent.com/watty62/Scot_covid19/master/regional_cases.csv") %>% 
-  pivot_longer(cols = 2:16, names_to = "hb", values_to = "new_cases") %>% 
-  rename(date = Date) %>% 
-  mutate(date = dmy(date)) %>% 
-  group_by(hb) %>% 
-  mutate(cum_cases = cumsum(new_cases)) %>% 
-  ungroup %>% 
-  arrange(hb, date)
-regions
-```
+```{r, fig.width=9, fig.height=6.75}
+regions <- read_csv("https://statistics.gov.scot/downloads/cube-table?uri=http%3A%2F%2Fstatistics.gov.scot%2Fdata%2Fdeaths-involving-coronavirus-covid-19") %>% 
+  clean_names()
 
+geog <- data.table::fread("https://www.opendata.nhs.scot/dataset/9f942fdb-e59e-44f5-b534-d6e17229cc7b/resource/395476ab-0720-4740-be07-ff4467141352/download/geography_codes_and_labels_dz2011_10012020.csv") %>% 
+  clean_names %>% 
+  select(hb, hb_name)
 
-```{r, fig.width=9, fig.height=6}
 regions %>% 
-  filter(hb != "Grand Total") %>% 
-  ggplot(aes(date, new_cases)) +
-  geom_col(fill = "#4477AA") +
-  geom_point(aes(date, cum_cases)) +
-  geom_path(aes(date, cum_cases)) +
-  facet_wrap(~hb, strip.position = "bottom") +
+  rename(hb = feature_code,
+         date = date_code) %>%
+  mutate(date = str_remove(date, "w/c "),
+         date = ymd(date)) %>% 
+  left_join(., geog) %>% 
+  filter(age == "All" & 
+           sex == "All" & 
+           cause_of_death == "COVID-19 related" & 
+           !is.na(hb_name) &
+           date >= ymd(20200301)) %>% 
+  distinct(hb_name, date, value) %>% 
+  group_by(hb_name) %>% 
+  mutate(cum_deaths = cumsum(value)) %>% 
+  ungroup %>% 
+  ggplot(aes(date, value)) +
+  geom_col(fill = "#160b75") +
+  facet_wrap(~ hb_name, strip.position = "bottom") +
   coord_cartesian(clip = "off") +
-  theme(plot.margin = margin(3,15,3,3,"mm")) +
-  labs(title = "COVID-19 confirmed cases by Scottish Health Board",
-       subtitle = "Daily incidence (bars) and cumulative total (line)",
+  theme(plot.margin = margin(3,15,3,3,"mm"),
+        plot.title = element_text(colour = "#330072"),
+        plot.subtitle = element_text(colour = "#330072"),
+        axis.text = element_text(colour = "#330072")) +
+  labs(title = "COVID-19 attributable deaths by Scottish Health Board",
+       subtitle = "Weekly incidence and cumulative total",
        x = "",
-       y = "Number of confirmed cases",
-       caption = "Data source: @watty62 https://github.com/watty62/Scot_covid19\nplot by @_davidhen https://github.com/davidhen/covid_19") -> hb_plot
+       y = "Number of attributable deaths",
+       caption = "Data source: National Records of Scotland\nplot by @_davidhen https://github.com/davidhen/nrs_covid_stats") -> hb_plot
 hb_plot
 ```
 
 ```{r}
-ggsave("hb_plot.png", hb_plot, width = 12, height = 9, dpi = 600)
+ggsave("hb_plot.png", hb_plot, width = 12, height = 9, dpi = 300)
+```
+
+```{r, fig.width=9, fig.height=6}
+
+regions %>% 
+  rename(hb = feature_code,
+         date = date_code) %>%
+  mutate(date = str_remove(date, "w/c "),
+         date = ymd(date)) %>% 
+  left_join(., geog) %>% 
+  filter(age != "All" & 
+           sex != "All" & 
+           cause_of_death == "COVID-19 related",
+         hb == "S92000003",
+         date >= ymd(20200301)) %>% 
+  ggplot(aes(date, value)) +
+  geom_col(fill = "#160b75") +
+  facet_grid(sex ~ age) +
+  coord_cartesian(clip = "off") +
+  theme(plot.margin = margin(3,15,3,3,"mm"),
+        plot.title = element_text(colour = "#330072"),
+        plot.subtitle = element_text(colour = "#330072"),
+        axis.text = element_text(colour = "#330072"),
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1)) +
+  labs(title = "COVID-19 attributable deaths by Age and Sex",
+       subtitle = "Weekly incidence",
+       x = "",
+       y = "Number of attributable deaths",
+       caption = "Data source: National Records of Scotland\nplot by @_davidhen https://github.com/davidhen/nrs_covid_stats") -> age_sex_plot
+age_sex_plot
+```
+
+
+```{r}
+ggsave("age_sex_plot.png", age_sex_plot, width = 12, height = 9, dpi = 300)
 ```

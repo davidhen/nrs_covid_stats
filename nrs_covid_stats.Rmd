@@ -1,0 +1,62 @@
+---
+title: "NRS Covid-19 Weekly stats"
+author: "David Henderson"
+date: "08/04/2020"
+output: html_document
+---
+
+#Intro
+
+Plot regional deaths from NRS weekly stats
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate)
+
+colours_davidhen <- c("#e53935", "#3949ab", "#8e24aa", "#039be5",
+                      "#00897b", "#7cb342", "#fdd835", "#fb8c00",
+                      "#6d4c41", "#546e7a")
+
+theme_set(theme_minimal(base_family = "Roboto") +
+            theme(panel.grid.minor = element_blank()))
+```
+
+
+# Plot
+
+Old code, amend this when we see the data at 12
+
+```{r}
+regions <- read_csv("https://raw.githubusercontent.com/watty62/Scot_covid19/master/regional_cases.csv") %>% 
+  pivot_longer(cols = 2:16, names_to = "hb", values_to = "new_cases") %>% 
+  rename(date = Date) %>% 
+  mutate(date = dmy(date)) %>% 
+  group_by(hb) %>% 
+  mutate(cum_cases = cumsum(new_cases)) %>% 
+  ungroup %>% 
+  arrange(hb, date)
+regions
+```
+
+
+```{r, fig.width=9, fig.height=6}
+regions %>% 
+  filter(hb != "Grand Total") %>% 
+  ggplot(aes(date, new_cases)) +
+  geom_col(fill = "#4477AA") +
+  geom_point(aes(date, cum_cases)) +
+  geom_path(aes(date, cum_cases)) +
+  facet_wrap(~hb, strip.position = "bottom") +
+  coord_cartesian(clip = "off") +
+  theme(plot.margin = margin(3,15,3,3,"mm")) +
+  labs(title = "COVID-19 confirmed cases by Scottish Health Board",
+       subtitle = "Daily incidence (bars) and cumulative total (line)",
+       x = "",
+       y = "Number of confirmed cases",
+       caption = "Data source: @watty62 https://github.com/watty62/Scot_covid19\nplot by @_davidhen https://github.com/davidhen/covid_19") -> hb_plot
+hb_plot
+```
+
+```{r}
+ggsave("hb_plot.png", hb_plot, width = 12, height = 9, dpi = 600)
+```

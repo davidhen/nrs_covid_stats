@@ -1,0 +1,119 @@
+---
+title: "NRS Covid_deaths"
+subtitle: "Care Home Anlaysis"
+author: "David Henderson"
+date: "25/05/2020"
+output: 
+  html_document:
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(curl)
+
+`%nin%` <- negate(`%in%`)
+
+theme_set(theme_minimal(base_family = "Roboto", base_size = 16) +
+            theme(panel.grid.minor = element_blank(),
+                  axis.title.y = element_text(margin = margin(0, 20, 0, 0)),
+                  axis.title.x = element_text(margin = margin(20, 0, 0, 0))))
+
+colours_davidhen <- c("#e53935", "#3949ab", "#8e24aa", "#039be5",
+                      "#00897b", "#7cb342", "#fdd835", "#fb8c00",
+                      "#6d4c41", "#546e7a")
+```
+
+
+
+# Data
+
+Average deaths source NRS "Related Statistics" from url as specified
+
+```{r, warning=FALSE, message=FALSE}
+temp_1 <- tempfile()
+temp_2 <- tempfile()
+source <- "https://www.nrscotland.gov.uk/files//statistics/covid19/deaths-by-location-sex-and-age-group-2020.zip"
+
+temp_1 <- curl_download(url = source, destfile = temp_1, quiet = FALSE)
+unzip(temp_1, exdir = temp_2)
+
+loc_age_deaths <- read_csv(file.path(temp_2,"deaths-by-location-sex-and-age-group-2020_Data.csv"), skip = 2) %>% 
+  select(-X7:-X10) %>%
+  slice(-923:-924) %>% 
+  clean_names
+```
+
+
+# Wrangle
+
+
+```{r}
+loc_age_deaths  %>%
+  pivot_wider(names_from = cause_of_death, values_from = deaths) %>%
+  mutate_at(vars(`Non-COVID-19`, `COVID-19`), ~replace_na(.x, 0)) %>% 
+  mutate(Total = `Non-COVID-19` + `COVID-19`) %>% 
+  pivot_longer(cols = `Non-COVID-19`:Total, names_to = "cause_of_death",
+               values_to = "deaths") %>% 
+  mutate(reg_week = as.integer(reg_week),
+         sex = factor(sex, levels = c("F", "M"),
+                      labels = c("Female", "Male")),
+         age_band = factor(age_band,
+                           levels = c("0", "1-14", "15-44",
+                                      "45-64", "65-74", "75-84", "85+")),
+         cause_of_death = factor(cause_of_death,
+                                 levels = c("Non-COVID-19", 
+                                            "COVID-19", "Total")),
+         location = factor(location,
+                           levels = c("Hospital", "Care Home", 
+                                      "Home / Non-institution", 
+                                      "Other institution"))) -> loc_age_deaths
+
+loc_age_deaths 
+```
+
+
+
+# Plot
+
+```{r, fig.width=12, fig.height=10}
+loc_age_deaths %>% 
+  filter(location != "Other institution") %>% 
+  filter(cause_of_death != "Non-COVID-19") %>% 
+  #filter(loc_cause %nin% c("Other institution_COVID-19", 
+  #                        "Other institution_Non-COVID-19")) %>% 
+  filter(age_band %nin% c("0", "1-14", "15-44")) %>% 
+  ggplot(aes(reg_week, deaths, colour = cause_of_death, group = cause_of_death)) +
+  geom_path() +
+  facet_grid(location ~ age_band+sex, switch = "y") +
+  scale_x_continuous(breaks = scales::pretty_breaks()) +
+  scale_y_continuous(position = "right") +
+  scale_colour_manual(values = colours_davidhen,
+                      guide = guide_legend(label.hjust = 0.5,
+                                           override.aes = list(
+                                             size = 5
+                                           ))) +
+  theme(legend.position = "top",
+        panel.spacing = unit(1, "lines")) +
+  labs(title = "Deaths in Scotland 2020",
+       subtitle = "by Age/Sex group and place of death",
+       x = "Week number",
+       y = "", 
+       caption = "Excluding Other institutions n = 102\nand ages <45 n = ?",
+       colour = "") -> age_loc_deaths_2
+age_loc_deaths_2
+```
+
+
+```{r, eval=FALSE, echo=FALSE}
+ggsave("age_loc_deaths_2.png", age_loc_deaths_2, width = 12, height = 10, dpi = 300)
+```

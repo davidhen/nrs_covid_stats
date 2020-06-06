@@ -1,0 +1,280 @@
+---
+title: "NRS Covid_deaths"
+subtitle: "Care Home Anlaysis"
+author: "David Henderson"
+date: "24/05/2020"
+output: 
+  html_document:
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(curl)
+
+`%nin%` <- negate(`%in%`)
+
+theme_set(theme_minimal(base_family = "Roboto", base_size = 16) +
+            theme(panel.grid.minor = element_blank(),
+                  axis.title.y = element_text(margin = margin(0, 20, 0, 0)),
+                  axis.title.x = element_text(margin = margin(20, 0, 0, 0))))
+
+colours_davidhen <- c("#e53935", "#3949ab", "#8e24aa", "#039be5",
+                      "#00897b", "#7cb342", "#fdd835", "#fb8c00",
+                      "#6d4c41", "#546e7a")
+
+scadr_colours <- c( "#330072", "#007d8a", "#009658","#011e41", "#160b75",
+                   "#09db9b", "#67899C", "#9896d9", "#a7aca2", "#f7a700")
+```
+
+
+
+# Data
+
+Released by NRS 25th May 2020. Covid deaths cover weeks 1-22 inclusive.
+
+Average deaths source NRS "Related Statistics" from url as specified
+
+```{r, warning=FALSE, message=FALSE}
+temp_1 <- tempfile()
+temp_2 <- tempfile()
+source <- "https://www.nrscotland.gov.uk/files//statistics/covid19/covid-deaths-data-week-22.zip"
+
+temp_1 <- curl_download(url = source, destfile = temp_1, quiet = FALSE)
+unzip(temp_1, exdir = temp_2)
+
+ch_death_covid <- read_csv(file.path(temp_2,"covid-deaths-data-week-22_Table 1 - COVID deaths.csv"), skip = 3)
+ch_death_all <- read_csv(file.path(temp_2, "covid-deaths-data-week-22_Table 2 - All deaths.csv"), skip = 3)
+ch_death_average <- read_csv("https://www.nrscotland.gov.uk/files//statistics/covid19/weekly-deaths-by-location-2015-2019.csv", skip = 2)
+```
+
+
+# Wrangle
+
+
+```{r,fig.width=9, fig.height=6}
+loc_names <- c("Care Home", "Home and other non institution", "Hospital",
+          "Other institution")
+
+#Wrangle Average deaths
+ch_death_average %>% 
+  slice(2:6, 9:13, 16:20, 23:27) %>% 
+  mutate(location = rep(loc_names, each = 5, times = 1)) %>% 
+  select(year = `Week number2`, location, everything(), -`53`) %>% 
+  pivot_longer(cols = `1`:`52`, names_to = "week_number",
+               values_to = "n_deaths") %>% 
+  group_by(location, week_number) %>%
+  mutate(min_deaths = min(n_deaths),
+         max_deaths = max(n_deaths),
+         mean_deaths = mean(n_deaths)) %>% 
+  distinct(location, week_number, .keep_all = TRUE) %>% 
+  select(-year, -n_deaths) %>% 
+  ungroup %>% 
+  mutate(week_number = as.integer(week_number)) -> main_tab
+
+#Wrangle all deaths
+ch_death_all %>% 
+  select(location = X2, everything(), -`Week beginning`, -X25:-X61) %>% 
+  slice(85:88) %>%  
+  mutate_at(vars(`30-Dec-19`:`25-May-20`), as.numeric) %>% 
+  pivot_longer(cols = `30-Dec-19`:`25-May-20`, names_to = "date",
+               values_to = "deaths_all_2020") %>% 
+  mutate(date = dmy(date),
+         week_number = rep(1:22, each = 1, times = 4),
+         location = rep(loc_names, each = 22, times = 1)) %>% 
+  select(-date) %>% 
+  left_join(main_tab, .) -> main_tab
+
+
+#Wrangle Covid deaths
+ch_death_covid %>% 
+  select(location = X2, everything(), -`Week beginning`,
+         -`Year to Date`:-X40) %>% 
+  slice(83:86) %>%  
+  pivot_longer(cols = `30-Dec-19`:`25-May-20`, names_to = "date",
+               values_to = "deaths_covid_2020") %>% 
+  mutate(date = dmy(date),
+         week_number = rep(1:22, each = 1, times = 4),
+         location = rep(loc_names, each = 22, times = 1)) %>% 
+  select(-date) %>% 
+  left_join(main_tab, .) %>% 
+  mutate(deaths_nonCovid_2020 = deaths_all_2020 - deaths_covid_2020,
+         location = fct_relevel(location, "Hospital")) -> main_tab
+
+```
+
+
+```{r, fig.width=12, fig.height=9}
+ann_text_1 <- data.frame(location = 
+                         factor("Hospital", 
+                                levels = c("Hospital", "Care Home",
+                                           "Home and other non institution",
+                                           "Other")),
+                       week_number = 35L, 
+                       deaths = 675, 
+                       label = "Shaded area shows range\nof deaths 2015-2019")
+
+ann_text_2 <- data.frame(location = 
+                         factor("Hospital", 
+                                levels = c("Hospital", "Care Home",
+                                           "Home and other non institution",
+                                           "Other")),
+                       week_number = 35L, 
+                       deaths = 350, 
+                       label = "text")
+
+ann_text_3 <- data.frame(location = 
+                         factor("Care Home", 
+                                levels = c("Hospital", "Care Home",
+                                           "Home and other non institution",
+                                           "Other")),
+                       week_number = 35L, 
+                       deaths = 350, 
+                       label = "text")
+
+ann_text_4 <- data.frame(location = 
+                         factor("Home and other non institution", 
+                                levels = c("Hospital", "Care Home",
+                                           "Home and other non institution",
+                                           "Other")),
+                       week_number = 37L, 
+                       deaths = 420, 
+                       label = "text",
+                       linetype = "dashed")
+
+main_tab %>% 
+  filter(location %nin% "Other institution") %>% 
+  pivot_longer(cols = c(deaths_all_2020, deaths_nonCovid_2020), 
+               names_to = "deaths_type", values_to = "deaths") %>% 
+  ggplot() +
+  geom_ribbon(aes(x = week_number,
+                  ymax = max_deaths, ymin = min_deaths), fill = "#4477aa",
+              alpha = 0.5) +
+  geom_line(aes(x = week_number, y = deaths, colour = deaths_type)) +
+  geom_line(aes(x = week_number, y = mean_deaths), linetype = "dashed",
+            size = 0.2) +
+  facet_wrap(~location) +
+  geom_text(data = ann_text_1, 
+            aes(x = week_number, y = deaths,
+                label = "Shaded area shows range\nof deaths 2015-2019\ndashed line shows weekly average"),
+            size = 3.2, hjust = 0.5) +
+  geom_text(data = ann_text_2,
+            aes(x = week_number, y = deaths,
+                label = "All hospital related deaths\nare much lower than\nthe historical average\nin recent weeks"),
+            size = 3.2, hjust = 0.5) +
+  geom_text(data = ann_text_3,
+            aes(x = week_number, y = deaths,
+                label = "Non Covid-19 related\nCare Home deaths\nhave returned to normal"),
+            size = 3.2, hjust = 0.5) +
+  geom_segment(data = ann_text_4,
+               aes(x = 22, xend = 22, y = 300, yend = 410),
+               size = 0.4,
+               arrow = arrow(length = unit(0.075, "inches"), ends = "both")) +
+  geom_text(data = ann_text_4, 
+            aes(x = week_number, y = deaths,
+                label = "The gap between historical\nhigh and both types of death\nat home remains high"),
+            size = 3.2, hjust = 0.5) +
+  scale_colour_manual(values = colours_davidhen,
+                      labels = c("All deaths\n2020", 
+                                 "Non Covid-19 deaths\n2020"),
+                      guide = guide_legend(label.hjust = 0.5,
+                                           override.aes = list(
+                                             size = 5
+                                           ))) +
+  scale_y_continuous(limits = c(0, 900)) +
+  theme(legend.position = "top",
+        plot.caption = element_text(size = 10, colour = "gray60")) +
+  labs(x = "Week number",
+       y = "Deaths(n)",
+       colour = "",
+       caption = 
+         "Excluding other institutional place of death\ntotal n = 107 for weeks 1-22 in 2020") -> loc_deaths_6
+loc_deaths_6
+```
+
+
+```{r}
+main_tab %>% 
+  filter(location == "Other institution") %>% 
+  summarise(n = sum(deaths_all_2020, na.rm = TRUE))
+```
+
+
+```{r, eval=FALSE, echo=FALSE}
+ggsave("loc_deaths_6_20200606.png", loc_deaths_6, width = 12, height = 9, dpi = 300)
+```
+
+
+
+```{r}
+ch_death_average %>% 
+  slice(2:6, 9:13, 16:20, 23:27) %>% 
+  mutate(location = rep(loc_names, each = 5, times = 1)) %>% 
+  select(year = `Week number2`, location, everything(), -`53`) %>% 
+  pivot_longer(cols = `1`:`52`, names_to = "week_number",
+               values_to = "n_deaths") %>% 
+  mutate(week_number = as.integer(week_number),
+         split = case_when(
+    week_number %in% c(1:11) ~ "Weeks 1-11",
+    week_number %in% c(12:22) ~ "Weeks 12-22")) %>% 
+  filter(split %in% c("Weeks 1-11", "Weeks 12-22")) %>% 
+  group_by(year, location, split) %>% 
+  summarise(year_deaths = sum(n_deaths)) %>%
+  group_by(location, split) %>% 
+  summarise(av_deaths = mean(year_deaths)) %>% 
+  ungroup -> av_deaths
+av_deaths
+```
+
+
+
+```{r, fig.width=12, fig.height=9}
+main_tab %>% 
+  mutate(split = case_when(
+    week_number %in% c(1:11) ~ "Weeks 1-11",
+    week_number %in% c(12:22) ~ "Weeks 12-22")) %>% 
+  filter(week_number %in% c(1:22)) %>%
+  filter(location != "Other institution") %>% 
+  group_by(split, location) %>% 
+  summarise(non_CV = sum(deaths_nonCovid_2020)) %>%
+  left_join(., av_deaths) %>%
+  ungroup %>% 
+  mutate(location = rep(c("Hospital", "Care Home", "Home/non-inst"), each = 1,
+        times = 2)) %>% 
+  pivot_longer(cols = c(non_CV:av_deaths), names_to = "type",
+               values_to = "deaths") %>%
+  mutate(location = factor(location,
+                           levels = c("Hospital", "Care Home", 
+                                      "Home/non-inst"))) %>% 
+  ggplot(aes(location, deaths, fill = type)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~split) +
+  scale_y_continuous(limits = c(0, 7500),
+                     breaks = scales::pretty_breaks()) +
+  scale_fill_manual(values = scadr_colours,
+                    labels = c("Average deaths\n2015-2019", 
+                               "Non-COVD-19\ndeaths")) + 
+  theme(legend.position = "top",
+        plot.caption = element_text(size = 10, colour = "grey40")) +
+  labs(title = "Number of deaths in Scotland, 2020",
+       subtitle = "by location of death",
+       fill = NULL,
+       x = NULL,
+       y = NULL,
+       caption = "Source: National Records of Scotland\nExcluding other place of death n = 107 for weeks 1-22") -> scadr
+scadr
+```
+
+
+```{r}
+ggsave("scadr.png", scadr, width = 12, height = 9, dpi = 600)
+```
+

@@ -23,7 +23,7 @@ colours_davidhen <- c("#e53935", "#3949ab", "#8e24aa", "#039be5",
                       "#00897b", "#7cb342", "#fdd835", "#fb8c00",
                       "#6d4c41", "#546e7a")
 
-scadr_colours <- c("#011e41", "#160b75", "#330072", "#009658", "#007d8a", 
+scadr_colours <- c( "#330072", "#007d8a", "#009658","#011e41", "#160b75",
                    "#09db9b", "#67899C", "#9896d9", "#a7aca2", "#f7a700")
 
 theme_set(theme_minimal(base_family = "Roboto") +
@@ -38,19 +38,28 @@ options(scipen = 10)
 Old code, amend this when we see the data at 12
 
 ```{r, fig.width=9, fig.height=6.75}
-regions <- read_csv("https://statistics.gov.scot/downloads/cube-table?uri=http%3A%2F%2Fstatistics.gov.scot%2Fdata%2Fdeaths-involving-coronavirus-covid-19") %>% 
-  clean_names()
+pop <- data.table::fread("https://www.opendata.nhs.scot/dataset/7f010430-6ce1-4813-b25c-f7f335bdc4dc/resource/27a72cc8-d6d8-430c-8b4f-3109a9ceadb1/download/hb2019_pop_est_02042020.csv") %>% 
+  clean_names %>% 
+  filter(year == "2018") %>% 
+  select(hb, all_ages) %>% 
+  group_by(hb) %>% 
+  mutate(pop = sum(all_ages)) %>% 
+  distinct(hb, pop)
 
 geog <- data.table::fread("https://www.opendata.nhs.scot/dataset/9f942fdb-e59e-44f5-b534-d6e17229cc7b/resource/395476ab-0720-4740-be07-ff4467141352/download/geography_codes_and_labels_dz2011_10012020.csv") %>% 
   clean_names %>% 
   select(hb, hb_name)
 
-regions %>% 
+regions <- read_csv("https://statistics.gov.scot/downloads/cube-table?uri=http%3A%2F%2Fstatistics.gov.scot%2Fdata%2Fdeaths-involving-coronavirus-covid-19") %>% 
+  clean_names() %>% 
   rename(hb = feature_code,
-         date = date_code) %>%
+         date = date_code) %>% 
   mutate(date = str_remove(date, "w/c "),
-         date = ymd(date)) %>% 
-  left_join(., geog) %>% 
+         date = ymd(date)) %>%
+  full_join(., geog) %>% 
+  mutate(hb_name = if_else(is.na(hb_name), "All", hb_name))
+
+regions %>% 
   filter(age == "All" & 
            sex == "All" & 
            cause_of_death == "COVID-19 related" & 
@@ -76,18 +85,12 @@ regions %>%
 hb_plot
 ```
 
-```{r}
+```{r, eval=FALSE}
 ggsave("hb_plot.png", hb_plot, width = 12, height = 9, dpi = 300)
 ```
 
 ```{r, fig.width=9, fig.height=6}
-
 regions %>% 
-  rename(hb = feature_code,
-         date = date_code) %>%
-  mutate(date = str_remove(date, "w/c "),
-         date = ymd(date)) %>% 
-  left_join(., geog) %>% 
   filter(age != "All" & 
            sex != "All" & 
            cause_of_death == "COVID-19 related",
@@ -111,6 +114,21 @@ age_sex_plot
 ```
 
 
-```{r}
+```{r, eval=FALSE}
 ggsave("age_sex_plot.png", age_sex_plot, width = 12, height = 9, dpi = 300)
+pop
 ```
+
+
+```{r}
+regions %>% 
+  filter(age == "All" & 
+           sex == "All" & 
+           cause_of_death == "COVID-19 related" & 
+           !is.na(hb_name) &
+           date >= ymd(20200301)) %>% 
+  distinct(hb_name, date, value, pop) %>% 
+  group_by(hb_name)
+  
+```
+

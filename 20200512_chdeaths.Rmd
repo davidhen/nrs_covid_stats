@@ -1,0 +1,367 @@
+---
+title: "NRS Covid_deaths"
+subtitle: "Care Home Anlaysis"
+author: "David Henderson"
+date: "13/05/2020"
+output: 
+  html_document:
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(lubridate)
+library(curl)
+
+theme_set(theme_minimal(base_family = "Roboto"))
+
+colours_davidhen <- c("#e53935", "#3949ab", "#8e24aa", "#039be5",
+                      "#00897b", "#7cb342", "#fdd835", "#fb8c00",
+                      "#6d4c41", "#546e7a")
+```
+
+
+
+# Data
+
+```{r, warning=FALSE, message=FALSE}
+temp_1 <- tempfile()
+temp_2 <- tempfile()
+source <- "https://www.nrscotland.gov.uk/files//statistics/covid19/covid-deaths-data-week-19.zip"
+
+temp_1 <- curl_download(url = source, destfile = temp_1, quiet = FALSE)
+unzip(temp_1, exdir = temp_2)
+
+ch_death_covid <- read_csv(file.path(temp_2,"covid-deaths-data-week-19_Table 1 - COVID deaths.csv"), skip = 3)
+ch_death_all <- read_csv(file.path(temp_2, "covid-deaths-data-week-19_Table 2 - All deaths.csv"), skip = 3)
+```
+
+#Tidy up
+
+```{r}
+ch_death_covid %>% 
+  select(-`Week beginning`, -`Year to Date`:-X37) %>% 
+  slice(33:46, 49:80, 83:86) %>% 
+  mutate(place = c(rep("hb", 14), rep("la", 32), rep("setting", 4))) %>% 
+  pivot_longer(cols = `30-Dec-19`:`4-May-20`, names_to = "date",
+               values_to = "deaths_covid") %>% 
+  mutate(date = dmy(date)) -> ch_death_covid
+ch_death_covid
+```
+
+
+
+
+```{r}
+ch_death_all %>% 
+  select(-`Week beginning`, -X22:-X58) %>% 
+  slice(35:48, 51:82, 85:88) %>% 
+  mutate(place = c(rep("hb", 14), rep("la", 32), rep("setting", 4))) %>% 
+  pivot_longer(cols = `30-Dec-19`:`4-May-20`, names_to = "date",
+               values_to = "deaths_all") %>% 
+  mutate(date = dmy(date)) -> ch_death_all
+ch_death_all
+```
+
+```{r}
+comb <- left_join(ch_death_covid, ch_death_all)
+comb
+```
+
+
+```{r}
+comb %>% 
+  filter(place == "setting" & date >= ymd(20200316)) %>% 
+  group_by(X2) %>% 
+  summarise(total_covid_deaths = sum(deaths_covid),
+            total_deaths = sum(deaths_all)) %>% 
+  mutate(pct_all_covid_deaths = round(total_covid_deaths/sum(total_covid_deaths) * 100,1),
+         pct_all_deaths = round(total_covid_deaths/total_deaths * 100,1)) -> ch_sum
+ch_sum
+```
+
+```{r, fig.width=9, fig.height=6}
+ch_sum %>% 
+  pivot_longer(cols = total_covid_deaths:total_deaths, names_to = "measure", values_to = "deaths") %>% 
+  ggplot(aes(X2, deaths, fill = measure)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(values = colours_davidhen, labels = c("Covid-19 deaths", "All deaths")) +
+  theme(legend.position = "top") +
+  labs(title = "Count of deaths in Scotland by location",
+       subtitle = "w/b 16th March to w/b 4th May 2020",
+       fill = "",
+       x = "",
+       y = "",
+       caption = "Source: National Records of Scotland 13th May 2020 release") -> ch_count
+ch_count
+```
+
+```{r, fig.width=9, fig.height=6}
+ch_sum %>% 
+  pivot_longer(cols = pct_all_covid_deaths:pct_all_deaths, names_to = "measure",
+               values_to = "deaths") %>% 
+  filter(X2 != "Other institution") %>% 
+  mutate(X2 = fct_relevel(X2, "Care Home", "Hospital")) %>% 
+  ggplot(aes(X2, deaths, fill = measure)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = paste0(deaths, "%")), 
+            position = position_dodge(width = 1),
+            vjust = -1) +
+  scale_fill_manual(values = c( "#4477AA", "#1a237e"), 
+                    labels = c("Scotland Covid-19 deaths",
+                               "All-cause deaths in location")) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1),
+                     limits = c(0, 63)) +
+  theme(legend.position = "top") +
+  labs(title = "",
+       subtitle = "",
+       fill = "",
+       x = "",
+       y = "") -> ch_pct
+ch_pct
+```
+
+```{r}
+ggsave("ch_count_20200606.png", ch_count, width = 9, height = 6, dpi=300)
+ggsave("ch_pct_20200606.png", ch_pct, width = 9, height = 6, dpi = 300)
+```
+
+
+```{r}
+ch_sum
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+old_deaths <- read_csv("https://www.nrscotland.gov.uk/files//statistics/covid19/weekly-deaths-by-location-2015-2019.csv",
+                       skip = 2)
+old_deaths %>% 
+  slice(1, 7:8, 14:15, 21:22, 28:29, 35) %>% 
+  mutate(X2 = c("blank", "Care Home", "blank", "Home / Non-institution", "blank",
+                      "Hospital", "blank", "Other institution", "blank", 
+                      "All locations")) %>% 
+  select(X2, everything(), -`Week number2`) %>% 
+  filter(X2 != "blank") %>% 
+  pivot_longer(cols = `1`:`53`, names_to = "date", values_to = "average_deaths") %>%
+  mutate(date = ymd(20200101) + weeks(date) - (weeks(1) + days(2))) -> old_deaths_long
+old_deaths_long
+```
+
+
+```{r}
+comb %>% 
+  filter(place == "setting") %>% 
+  left_join(., old_deaths_long) %>% 
+  filter(date >= ymd(20200316)) %>% 
+  mutate(non_cv = deaths_all - deaths_covid,
+         diff = deaths_all - non_cv) %>% 
+  select(X2, date, average_deaths, deaths_covid, deaths_all, 
+         non_cv, diff) -> comb_2
+comb_2
+```
+
+
+```{r, fig.width=9, fig.height=6}
+comb_2 %>% 
+  pivot_longer(cols = average_deaths:deaths_all, names_to = "measure",
+               values_to = "n") %>% 
+  ggplot(aes(date, n, fill = measure)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~X2) +
+  scale_fill_manual(values = colours_davidhen, 
+                    labels = c("Average weekly deaths\n2015-2019", 
+                               "All-cause deaths in location",
+                               "Covid-19 deaths in location")) +
+  scale_x_date(breaks = scales::pretty_breaks(n = 8)) +
+  theme(legend.position = "top") +
+  labs(title = "Count of deaths in Scotland by location",
+       subtitle = "w/b 16th March to w/b 25th May 2020",
+       fill = "",
+       x = "",
+       y = "",
+       caption = "Source: National Records of Scotland 13th May 2020 release") -> loc_deaths
+loc_deaths
+```
+
+```{r}
+ggsave("loc_deaths_20200606.png", loc_deaths, width = 9, height = 6, dpi = 300)
+```
+
+
+```{r, fig.width=9, fig.height=6}
+comb_2 %>% 
+  pivot_longer(cols = average_deaths:diff, names_to = "measure", values_to = "n") %>%
+  filter(measure %in% c("average_deaths", "deaths_all", "non_cv")) %>% 
+  ggplot(aes(date, n, fill = measure)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~X2) +
+  scale_fill_manual(values = colours_davidhen, 
+                    labels = c("Average deaths\n2015-2019",
+                               "Actual all-cause\ndeaths in location",
+                               "Non-Covid deaths")) +
+  scale_x_date(breaks = scales::pretty_breaks(n = 8)) +
+  theme(legend.position = "top") +
+  labs(title = "Count of deaths in Scotland by location",
+       subtitle = "w/b 16th March to w/b 25th May 2020",
+       fill = "",
+       x = "",
+       y = "",
+       caption = "Source: National Records of Scotland 13th May 2020 release") -> loc_deaths_2
+loc_deaths_2
+```
+
+
+```{r}
+ggsave("loc_deaths_2_20200606.png", loc_deaths_2, width = 9, height = 6, dpi = 300)
+```
+
+
+
+```{r, fig.width=9, fig.height=4.5}
+comb_2 %>% 
+  pivot_longer(cols = average_deaths:diff, names_to = "measure", values_to = "n") %>% 
+  filter(measure %in% c("average_deaths", "deaths_all", "deaths_covid", "non_cv") &
+           X2 != "Other institution") %>%
+  mutate(X2 = fct_relevel(X2, "Hospital", "Care Home", 
+                          "Home / Non-institution")) %>% 
+   group_by(X2, measure) %>% 
+  summarise(series_total = sum(n)) %>% 
+  ggplot(aes(measure, series_total, fill = measure)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~X2) +
+  scale_fill_manual(values = colours_davidhen, 
+                    labels = c("Average deaths\n2015-2019",
+                               "Actual all-cause\ndeaths",
+                               "Actual deaths attributed\n to Covid-19",
+                               "Non-Covid-19\ndeaths")) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(), 
+        panel.spacing = unit(3, "lines")) +
+  labs(title = "Count of deaths in Scotland by location",
+       subtitle = "w/b 16th March to w/b 4th May 2020",
+       fill = "",
+       x = "",
+       y = "",
+       caption = "@_davidhen\nSource: National Records of Scotland 13th May 2020 release") -> loc_deaths_3
+loc_deaths_3
+```
+
+```{r}
+ggsave("loc_deaths_3.png", loc_deaths_3, width = 9, height = 4.5, dpi = 300)
+```
+
+
+```{r, fig.width=9, fig.height=4.5}
+comb_2 %>% 
+  pivot_longer(cols = average_deaths:diff, names_to = "measure", values_to = "n") %>% 
+  filter(measure %in% c("average_deaths", "non_cv") &
+           X2 != "Other institution") %>%
+  mutate(X2 = fct_relevel(X2, "Hospital", "Care Home", 
+                          "Home / Non-institution")) %>% 
+  group_by(X2, measure) %>% 
+  summarise(series_total = sum(n)) %>% 
+  ggplot(aes(measure, series_total, fill = measure)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~X2) +
+  scale_fill_manual(values = c( "#4477AA", "#1a237e"),
+                    labels = c("Average deaths\n2015-2019",
+                               "All-cause deaths\nminus Covid-19\ndeaths")) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(), 
+        panel.spacing = unit(3, "lines")) +
+  labs(title = "Count of deaths in Scotland by location",
+       subtitle = "w/b 16th March to w/b 4th May 2020",
+       fill = "",
+       x = "",
+       y = "",
+       caption = "Source: National Records of Scotland 13th May 2020 release") -> loc_deaths_4
+loc_deaths_4
+```
+
+```{r}
+ggsave("loc_deaths_4.png", loc_deaths_4, width = 9, height = 4.5, dpi = 300)
+```
+
+
+```{r, fig.width=9, fig.height=7}
+comb_2 %>%
+  select(X2, date, average_deaths, deaths_covid, non_cv) %>% 
+  filter(X2 != "Other institution") %>%
+  mutate(X2 = fct_relevel(X2, "Hospital", "Care Home", 
+                          "Home / Non-institution")) %>% 
+  group_by(X2) %>% 
+  summarise(average_deaths = sum(average_deaths),
+            deaths_covid = sum(deaths_covid),
+            non_cv = sum(non_cv)) %>% 
+  pivot_longer(cols = average_deaths:non_cv, names_to = "total", values_to = "n") %>% 
+  mutate(place = rep(c("total", "nums", "nums"), 3),
+         place = factor(place,
+                        levels = c("total", "nums"))) %>% 
+  ggplot(aes(place, n, fill = total)) +
+  geom_col(position = "stack") +
+  facet_wrap(~X2) +
+  scale_fill_manual(values = c( "#4477AA",  "#9fa8da", "#1a237e"),
+                    labels = c("Average deaths\n2015-2019",
+                               "Covid-19\nDeaths",
+                               "Non-Covid-19\nDeaths")) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(),
+        panel.spacing = unit(4, "lines")) +
+  labs(x = "",
+       y = "",
+       fill = "", 
+       title = "Total deaths in Scotland by location of death",
+       subtitle = "w/b 16th March to w/b 4th May 2020",
+       caption = "excluding Other place of death n=40") -> loc_deaths_5
+loc_deaths_5
+```
+
+
+
+```{r}
+ggsave("loc_deaths_5.png", loc_deaths_5, width = 9, height = 4.5, dpi = 300)
+```
+
+
+
+```{r, fig.width=9, fig.height=4.5}
+comb_2 %>% 
+  pivot_longer(cols = average_deaths:diff, names_to = "measure", values_to = "n") %>% 
+  filter(measure %in% c("average_deaths", "deaths_all", "non_cv") &
+           X2 != "Other institution") %>%
+  mutate(X2 = fct_relevel(X2, "Hospital", "Care Home", 
+                          "Home / Non-institution"),
+         measure = fct_relevel(measure, "average_deaths", 
+                               "non_cv", "deaths_all")) %>% 
+  group_by(X2, measure) %>% 
+  summarise(series_total = sum(n)) %>% 
+  ggplot(aes(measure, series_total, fill = measure)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~X2) +
+  scale_fill_manual(values = c( "#4477AA", "#1a237e", "#9fa8da"),
+                    labels = c("Average deaths\n2015-2019",
+                               "All-cause deaths\nminus Covid-19\ndeaths",
+                               "All-cause\ndeaths")) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_blank(), 
+        panel.spacing = unit(3, "lines")) +
+  labs(title = "Count of deaths in Scotland by location",
+       subtitle = "w/b 16th March to w/b 4th May 2020",
+       fill = "",
+       x = "",
+       y = "",
+       caption = "Source: National Records of Scotland 13th May 2020 release") -> loc_deaths_5
+loc_deaths_5
+```
+
+
+```{r}
+ggsave("loc_deaths_5.png", loc_deaths_5, width = 9, height = 4.5, dpi = 300)
+```

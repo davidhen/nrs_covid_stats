@@ -1,0 +1,136 @@
+---
+title: "Covid-open-data"
+author: "David Henderson"
+date: "06/06/2020"
+output: 
+  html_document:
+    theme: journal
+    highlight: haddock
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      fig.width = 9, fig.height = 6)
+```
+
+# Introduction
+
+## Packages
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+#Get most up-to-date version of opendatascot
+#remotes::install_github("datasciencescotland/opendatascot", force = TRUE)
+library(janitor)
+library(lubridate)
+library(opendatascot) 
+#library(phsmethods)   #remotes::install.github("Health-SocialCare-Scotland/phsmethods")
+
+`%nin%` <- negate(`%in%`)
+
+theme_set(theme_minimal(base_family = "Roboto", base_size = 16) +
+            theme(panel.grid.minor = element_blank(),
+                  axis.title.y = element_text(margin = margin(0, 20, 0, 0)),
+                  axis.title.x = element_text(margin = margin(20, 0, 0, 0))))
+```
+
+## Data
+
+### Main data
+
+Scrape deaths dataset - note I am selecting Scotland only here - it is possible to split by LA or Health Board...
+
+(*Note* issue with API where dates are not being coerced correctly and information is lost. Therefore downloading from the csv link for now)
+
+```{r, warning=FALSE, message=FALSE}
+#cv_data_main <- ods_dataset("deaths-involving-coronavirus-covid-19",
+                            #return only national data
+ #                           geography = "sc") %>% 
+#  select(-refArea, -measureType)
+
+cv_data_main <- read_csv("https://statistics.gov.scot/downloads/cube-table?uri=http%3A%2F%2Fstatistics.gov.scot%2Fdata%2Fdeaths-involving-coronavirus-covid-19") %>% 
+  clean_names() %>% 
+  filter(feature_code == "S92000003") %>% 
+  mutate(date_code = str_replace(date_code, "w/c ", ""),
+         date_code = ymd(date_code)) %>% 
+  filter(!is.na(date_code)) %>% 
+  select(date_code, sex, age, cause_of_death, location_of_death, measurement, value, 
+         -feature_code, -units) %>% 
+  arrange(date_code, sex, age, cause_of_death, location_of_death, measurement)
+
+cv_data_main 
+```
+
+
+### Management info
+
+There is a lot of information in this extract. I am filtering to just include delayed discharges and care home information for Scotland as a whole. You can see all the available info with the `ods_structure("coronavirus-covid-19-management-information")` command. 
+
+
+```{r}
+cv_data_manage <- ods_dataset("coronavirus-covid-19-management-information",
+                              variable = 
+                                c("delayed-discharges",
+      "adult-care-homes-cumulative-number-that-have-reported-a-suspected-covid-19-case",
+      "adult-care-homes-proportion-that-have-reported-a-suspected-covid-19-case",
+      "adult-care-homes-cumulative-number-that-have-reported-more-than-one-suspected-covid-19-case",
+      "adult-care-homes-number-with-current-suspected-covid-19-cases",
+      "adult-care-homes-proportion-with-current-suspected-covid-19-cases",
+      "adult-care-homes-cumulative-number-of-suspected-covid-19-cases",
+      "adult-care-homes-daily-number-of-new-suspected-covid-19-cases",
+      "adult-care-homes-number-of-staff-reported-as-absent",
+      "adult-care-homes-adult-care-homes-which-submitted-a-return",
+      "adult-care-homes-response-rate",
+      "adult-care-homes-total-number-of-staff-in-adult-care-homes-which-submitted-a-return",
+      "adult-care-homes-staff-absence-rate"),
+      geography = "sc") %>% 
+  select(-refArea)
+cv_data_manage
+```
+
+
+# Plots
+
+## Figure 1
+
+```{r, fig.width=12, fig.height=9}
+cv_data_main %>% 
+  filter(sex == "All" & location_of_death == "All" & cause_of_death == "COVID-19 related") %>% 
+  filter(age != "All") %>% 
+  group_by(age) %>% 
+  summarise(n = sum(value)) %>%
+  mutate(pct = round(n/sum(n), 3)) %>% 
+  ggplot(aes(age, n)) +
+  geom_col(fill = "#4477AA") +
+  geom_text(aes(label = scales::percent(pct, accuracy = 0.1), y = n + 80)) +
+  scale_y_continuous(limits = c(0, 2000)) +
+  labs(x = "",
+       y = "",
+       title = "Deaths Associated with COVID-19 by Age Group",
+       subtitle = "16th March 2020 to 25th May 2020",
+       caption = "Source: National Records of Scotland\nDeaths where COVID-19 mentioned on the death certificate")
+  
+```
+
+## Figure 2
+
+```{r}
+cv_data_main %>% 
+  filter(sex == "All" & location_of_death == "All" & cause_of_death == "COVID-19 related") %>% 
+  filter(age != "All") %>% 
+  group_by(age) %>% 
+  summarise(n = sum(value)) %>% 
+  mutate(pct = round(n/sum(n) *100 ,1))
+```
+
+
+
+# Session Info
+
+```{r}
+devtools::session_info()
+```
+
+
